@@ -36,7 +36,7 @@ function formatIndoPhone($number)
 
 function wablas($message, $phone = '')
 {
-    $WABLAS_TOKEN = 'YOUR_WABLAS_TOKEN_HERE'; // ganti dengan tokenmu
+    $WABLAS_TOKEN = '3NCX72aOde4meolTukZte2PjwY1I8O7pYz3QS6AP56JlKBuMw5fIodG2jlZoTywZ.3EmBGgzH'; // ganti dengan tokenmu
 
     $curl = curl_init();
     $payload = [
@@ -197,7 +197,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $mode = $_POST['kirim'] ?? 'debug';
         $link = sanitize_link($_POST['link'] ?? '');
-
         $rows = [];
 
         if ($mode === 'json') {
@@ -239,6 +238,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'nama'     => $cells[2] ?? '',
                         'nohp'     => $cells[3] ?? '',
                         'batch'    => $cells[4] ?? '',
+                        'terlambat' => trim($_POST['terlambat_excel'] ?? 'Kamis 4 September 2025 Pukul 16.00')
                     ];
                 }
             }
@@ -250,6 +250,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'nama'     => $_POST['nama'] ?? '',
                 'nohp'     => $_POST['nohp'] ?? '',
                 'batch'     => $_POST['batch'] ?? '',
+                'terlambat' => trim($_POST['terlambat_debug'] ?? 'Kamis 4 September 2025 Pukul 16.00'),
             ]];
         }
 
@@ -265,12 +266,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $phone = formatIndoPhone($nohpRaw);
-            $message =
-                "Assalamualaikum w wb..Bapak/Ibu {$nama}" . PHP_EOL . PHP_EOL .
-                "Sehubungan dengan adanya kebutuhan untuk memperbarui data diri..." . PHP_EOL .
+            // Template pesan
+            $message = "Assalamualaikum w wb..Bapak/Ibu {$nama}" . PHP_EOL . PHP_EOL .
+                "Sehubungan dengan adanya kebutuhan untuk memperbarui data diri, bersama ini kami sampaikan agar dapat melakukan update data diri melalui tautan pada link:" . PHP_EOL .
                 $link . PHP_EOL . PHP_EOL .
+                "dengan menggunakan " . PHP_EOL .
                 "👤 Username: {$username}" . PHP_EOL .
-                "🔑 Password: {$password}" . PHP_EOL;
+                "🔑 Password: {$password}" . PHP_EOL . PHP_EOL .
+                "Kami mohon agar pengisian dilakukan dengan benar, lengkap, dan sesuai dengan kondisi terkini, sehingga data yang tercatat dapat lebih valid dan akurat." . PHP_EOL .
+                "Atas perhatian dan kerjasamanya, kami ucapkan terima kasih." . PHP_EOL . PHP_EOL .
+                "Terlampir surat permohonan update data" . PHP_EOL .
+                "https://s.uad.id/SuratPermohonanUpdateDataDiri" . PHP_EOL . PHP_EOL .
+                "Tutorial update data diri" . PHP_EOL .
+                "https://s.uad.id/TutorialUpdateDataDiri" . PHP_EOL . PHP_EOL .
+                "*Pengisian Paling Lambat, " . $entry['terlambat'] . "*" . PHP_EOL . PHP_EOL .
+                "Jika ada pertanyaan silahkan kontak ke nomor ini. " . PHP_EOL .
+                "Terima Kasih";
 
             $apiRes = wablas($message, $phone);
             $results[] = [
@@ -410,10 +421,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <label>Password</label><input type="text" name="password" value="2251khyt" />
                 <label>Nama</label><input type="text" name="nama" value="ARI PERYANTO" />
                 <label>No HP</label><input type="text" name="nohp" value="6283867679277" />
+                <label>Pengisian paling lambat</label><input type="text" name="terlambat_debug" value="Kamis 4 September 2025 Pukul 16.00" />
                 <label>Batch</label><input type="text" name="batch" value="kloter 1" />
             </div>
 
             <div id="excel-form" class="card" style="display:none;">
+                <label>Pengisian paling lambat</label><input type="text" name="terlambat_excel" value="Kamis 4 September 2025 Pukul 16.00" />
                 <h3>Upload Excel</h3>
                 <input type="file" name="excel" accept=".xlsx,.ods,.csv" />
             </div>
