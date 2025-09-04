@@ -4,10 +4,12 @@
  * Single-file PHP: Form + Debug mode + JSON mode + Excel upload (Box/Spout)
  * Features:
  * - Download Excel template (?download_template=1)
- * - Read XLSX/XLS/ODS/CSV via box/spout
+ * - Read XLSX/ODS/CSV via box/spout
  * - Fallback manual input (debug mode)
  * - Optional JSON source (karyawan.json)
  * - Send message via Wablas API
+ * - Save sent results (Excel mode) into sent.json
+ * - View sent log (?view_sent=1)
  *
  * Requirements:
  *   composer require box/spout
@@ -23,23 +25,18 @@ function formatIndoPhone($number)
 {
     $number = preg_replace('/[^0-9]/', '', (string)$number);
     if ($number === '') return $number;
-    if (strpos($number, '00') === 0) {
-        // e.g. 0062... -> 62...
-        $number = ltrim($number, '0');
-    }
     if (substr($number, 0, 1) === '0') {
         return '62' . substr($number, 1);
     }
     if (substr($number, 0, 2) === '62') {
         return $number;
     }
-    return $number; // biarkan apa adanya (misal sudah intl tanpa +)
+    return $number;
 }
 
 function wablas($message, $phone = '')
 {
-    // TODO: Ganti token dengan punyamu sendiri. Simpan di env kalau bisa.
-    $WABLAS_TOKEN = '3NCX72aOde4meolTukZte2PjwY1I8O7pYz3QS6AP56JlKBuMw5fIodG2jlZoTywZ.3EmBGgzH';
+    $WABLAS_TOKEN = 'YOUR_WABLAS_TOKEN_HERE'; // ganti dengan tokenmu
 
     $curl = curl_init();
     $payload = [
@@ -68,16 +65,14 @@ function wablas($message, $phone = '')
         return [
             'ok'     => false,
             'error'  => 'cURL Error: ' . $err,
-            'raw'    => null,
         ];
     }
     curl_close($curl);
 
     $json = json_decode($rs, true);
     return [
-        'ok'    => is_array($json) ? true : false,
-        'error' => null,
-        'raw'   => $rs,
+        'ok'    => is_array($json),
+        'error' => is_array($json) ? null : $rs,
         'json'  => $json,
     ];
 }
@@ -101,13 +96,96 @@ if (isset($_GET['download_template'])) {
     $writer->openToBrowser($filename);
 
     // Header
-    $writer->addRow(WriterEntityFactory::createRowFromArray(['username', 'password', 'nama', 'nohp']));
-
-    // Example rows (optional)
-    $writer->addRow(WriterEntityFactory::createRowFromArray(['2251khyt', '2251khyt', 'ARI PERYANTO', '+6285643692200']));
-    $writer->addRow(WriterEntityFactory::createRowFromArray(['1234abcd', 'abcd1234', 'BUDI SANTOSO', '081234567890']));
+    $writer->addRow(WriterEntityFactory::createRowFromArray(['username', 'password', 'nama', 'nohp', 'batch']));
+    $writer->addRow(WriterEntityFactory::createRowFromArray(['2251khyt', '2251khyt', 'ARI PERYANTO', '6285643692200', 'kloter1']));
+    $writer->addRow(WriterEntityFactory::createRowFromArray(['1234abcd', 'abcd1234', 'BUDI SANTOSO', '081234567890', 'kloter1']));
 
     $writer->close();
+    exit;
+}
+
+// ==================== View Sent Log ==================== //
+if (isset($_GET['view_sent'])) {
+    $logFile = __DIR__ . '/sent.json';
+    $sent = [];
+    if (is_file($logFile)) {
+        $sent = json_decode(file_get_contents($logFile), true) ?: [];
+    }
+?>
+    <!DOCTYPE html>
+    <html lang="id">
+
+    <head>
+        <meta charset="UTF-8">
+        <title>Log Pesan Terkirim</title>
+        <style>
+            body {
+                font-family: Arial, sans-serif;
+                padding: 20px;
+            }
+
+            table {
+                border-collapse: collapse;
+                width: 100%;
+            }
+
+            th,
+            td {
+                border: 1px solid #ddd;
+                padding: 8px;
+            }
+
+            th {
+                background: #f1f5f9;
+            }
+
+            .ok {
+                color: green;
+                font-weight: bold;
+            }
+
+            .fail {
+                color: red;
+                font-weight: bold;
+            }
+        </style>
+    </head>
+
+    <body>
+        <h2>Log Pesan Terkirim</h2>
+        <?php if (empty($sent)): ?>
+            <p><em>Belum ada pesan terkirim.</em></p>
+        <?php else: ?>
+            <table>
+                <thead>
+                    <tr>
+                        <th>No</th>
+                        <th>Nama</th>
+                        <th>Nomor</th>
+                        <th>Status</th>
+                        <th>Detail</th>
+                        <th>Batch</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($sent as $i => $r): ?>
+                        <tr>
+                            <td><?= $i + 1 ?></td>
+                            <td><?= htmlspecialchars($r['nama'] ?? '-') ?></td>
+                            <td><?= htmlspecialchars($r['phone'] ?? '-') ?></td>
+                            <td class="<?= strtolower($r['status']) === 'ok' ? 'ok' : 'fail' ?>"><?= $r['status'] ?></td>
+                            <td><?= htmlspecialchars($r['detail'] ?? '') ?></td>
+                            <td><?= htmlspecialchars($r['batch'] ?? '') ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
+        <p><a href="./">⬅️ Kembali ke Form</a></p>
+    </body>
+
+    </html>
+<?php
     exit;
 }
 
@@ -127,16 +205,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!is_file($fileJSON)) {
                 throw new RuntimeException('File karyawan.json tidak ditemukan.');
             }
-            $jsonData = file_get_contents($fileJSON);
-            $rows = json_decode($jsonData, true);
-            if (json_last_error() !== JSON_ERROR_NONE) {
-                throw new RuntimeException('JSON tidak valid: ' . json_last_error_msg());
-            }
+            $rows = json_decode(file_get_contents($fileJSON), true) ?: [];
         } elseif ($mode === 'excel' && isset($_FILES['excel']) && $_FILES['excel']['error'] === UPLOAD_ERR_OK) {
             $orig = $_FILES['excel']['name'];
             $tmp  = $_FILES['excel']['tmp_name'];
-
-            $ext = strtolower(pathinfo($orig, PATHINFO_EXTENSION));
+            $ext  = strtolower(pathinfo($orig, PATHINFO_EXTENSION));
 
             switch ($ext) {
                 case 'xlsx':
@@ -153,33 +226,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $reader->open($tmp);
-
             foreach ($reader->getSheetIterator() as $sheet) {
                 $rowIndex = 0;
                 foreach ($sheet->getRowIterator() as $row) {
                     $rowIndex++;
                     if ($rowIndex === 1) continue; // skip header
                     $cells = $row->toArray();
-                    // Skip baris kosong total
-                    if (empty(array_filter($cells, fn($v) => trim((string)$v) !== ''))) {
-                        continue;
-                    }
+                    if (empty(array_filter($cells, fn($v) => trim((string)$v) !== ''))) continue;
                     $rows[] = [
                         'username' => $cells[0] ?? '',
                         'password' => $cells[1] ?? '',
                         'nama'     => $cells[2] ?? '',
                         'nohp'     => $cells[3] ?? '',
+                        'batch'    => $cells[4] ?? '',
                     ];
                 }
             }
             $reader->close();
         } else {
-            // debug/manual
             $rows = [[
                 'username' => $_POST['username'] ?? '',
                 'password' => $_POST['password'] ?? '',
                 'nama'     => $_POST['nama'] ?? '',
                 'nohp'     => $_POST['nohp'] ?? '',
+                'batch'     => $_POST['batch'] ?? '',
             ]];
         }
 
@@ -191,27 +261,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $nohpRaw  = trim((string)($entry['nohp'] ?? ''));
 
             if ($username === '' && $password === '' && $nama === '' && $nohpRaw === '') {
-                continue; // lewati baris kosong
+                continue;
             }
 
             $phone = formatIndoPhone($nohpRaw);
-
             $message =
                 "Assalamualaikum w wb..Bapak/Ibu {$nama}" . PHP_EOL . PHP_EOL .
-                "Sehubungan dengan adanya kebutuhan untuk memperbarui data diri, bersama ini kami sampaikan agar dapat melakukan update data diri melalui tautan pada link:" . PHP_EOL .
+                "Sehubungan dengan adanya kebutuhan untuk memperbarui data diri..." . PHP_EOL .
                 $link . PHP_EOL . PHP_EOL .
-                "dengan menggunakan " . PHP_EOL .
                 "👤 Username: {$username}" . PHP_EOL .
-                "🔑 Password: {$password}" . PHP_EOL . PHP_EOL .
-                "Kami mohon agar pengisian dilakukan dengan benar, lengkap, dan sesuai dengan kondisi terkini, sehingga data yang tercatat dapat lebih valid dan akurat." . PHP_EOL .
-                "Atas perhatian dan kerjasamanya, kami ucapkan terima kasih." . PHP_EOL . PHP_EOL .
-                "Terlampir surat permohonan update data" . PHP_EOL .
-                "https://s.uad.id/SuratPermohonanUpdateDataDiri" . PHP_EOL . PHP_EOL .
-                "Tutorial update data diri" . PHP_EOL .
-                "https://s.uad.id/TutorialUpdateDataDiri" . PHP_EOL . PHP_EOL .
-                "*Pengisian Paling Lambat, Kamis 4 September 2025 Pukul 16.00*" . PHP_EOL . PHP_EOL .
-                "Jika ada pertanyaan silahkan kontak ke nomor ini. " . PHP_EOL .
-                "Terima Kasih";
+                "🔑 Password: {$password}" . PHP_EOL;
 
             $apiRes = wablas($message, $phone);
             $results[] = [
@@ -219,14 +278,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'nama'    => $nama,
                 'status'  => $apiRes['ok'] ? 'OK' : 'FAIL',
                 'detail'  => $apiRes['ok'] ? ($apiRes['json']['message'] ?? 'sent') : $apiRes['error'],
+                'batch' => $entry['batch']
             ];
+        }
+
+        // Selalu simpan log, apapun mode-nya
+        if (!empty($results)) {
+            $logFile = __DIR__ . '/sent.json';
+            $json = json_encode($results, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+
+            if (false === file_put_contents($logFile, $json)) {
+                die("⚠️ Gagal menulis ke $logFile, cek permission folder.");
+            }
         }
     } catch (Throwable $e) {
         $errorMsg = $e->getMessage();
     }
 }
 ?>
-
 <!DOCTYPE html>
 <html lang="id">
 
@@ -235,7 +304,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <title>Form Kirim Pesan WA Massal</title>
     <style>
         body {
-            font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, sans-serif;
+            font-family: Arial, sans-serif;
             padding: 24px;
         }
 
@@ -272,51 +341,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             background: #2563eb;
             color: #fff;
             cursor: pointer;
+            text-decoration: none;
         }
 
         .btn-secondary {
             background: #64748b;
-            text-decoration: none;
-            display: inline-block;
         }
 
-        .muted {
-            color: #64748b;
-            font-size: 12px;
+        .ok {
+            color: green;
+            font-weight: bold;
         }
 
-        pre {
-            background: #0b1020;
-            color: #e5e7eb;
-            padding: 12px;
-            border-radius: 8px;
-            overflow: auto;
+        .fail {
+            color: red;
+            font-weight: bold;
         }
 
         table {
-            width: 100%;
             border-collapse: collapse;
+            width: 100%;
         }
 
         th,
         td {
-            border: 1px solid #e5e7eb;
+            border: 1px solid #ddd;
             padding: 8px;
-            text-align: left;
         }
 
         th {
             background: #f8fafc;
-        }
-
-        .ok {
-            color: #16a34a;
-            font-weight: 600;
-        }
-
-        .fail {
-            color: #dc2626;
-            font-weight: 600;
         }
     </style>
     <script>
@@ -334,7 +388,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <h2>Kirim Pesan WA Massal</h2>
         <div class="row">
             <a class="btn btn-secondary" href="?download_template=1">📥 Unduh Template Excel</a>
-            <span class="muted">&nbsp;Format didukung: XLSX, XLS, ODS, CSV (kolom: username, password, nama, nohp)</span>
+            <a class="btn btn-secondary" href="?view_sent=1" target="_blank">📖 Lihat Log Terkirim</a>
         </div>
         <form method="post" enctype="multipart/form-data">
             <div class="row">
@@ -345,35 +399,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <label>Mode Kirim?</label>
                 <select name="kirim" id="kirim" onchange="toggleForm()">
                     <option value="debug">Debug (isi manual)</option>
-                    <option value="json">Kirim (pakai karyawan.json)</option>
+                    <!-- <option value="json">Kirim (pakai karyawan.json)</option> -->
                     <option value="excel">Kirim (upload Excel)</option>
                 </select>
             </div>
 
             <div id="debug-form" class="card" style="display:none;">
                 <h3>Data Debug</h3>
-                <div class="row">
-                    <label>Username</label>
-                    <input type="text" name="username" value="2251khyt" />
-                </div>
-                <div class="row">
-                    <label>Password</label>
-                    <input type="text" name="password" value="2251khyt" />
-                </div>
-                <div class="row">
-                    <label>Nama</label>
-                    <input type="text" name="nama" value="ARI PERYANTO" />
-                </div>
-                <div class="row">
-                    <label>No HP</label>
-                    <input type="text" name="nohp" value="+6285643692200" />
-                </div>
+                <label>Username</label><input type="text" name="username" value="2251khyt" />
+                <label>Password</label><input type="text" name="password" value="2251khyt" />
+                <label>Nama</label><input type="text" name="nama" value="ARI PERYANTO" />
+                <label>No HP</label><input type="text" name="nohp" value="6283867679277" />
+                <label>Batch</label><input type="text" name="batch" value="kloter 1" />
             </div>
 
             <div id="excel-form" class="card" style="display:none;">
                 <h3>Upload Excel</h3>
-                <input type="file" name="excel" accept=".xlsx,.xls,.ods,.csv" />
-                <div class="muted">Kolom wajib: <b>A=Username</b>, <b>B=Password</b>, <b>C=Nama</b>, <b>D=NoHP</b></div>
+                <input type="file" name="excel" accept=".xlsx,.ods,.csv" />
             </div>
 
             <button type="submit">Kirim Pesan</button>
@@ -381,15 +423,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </div>
 
     <?php if ($errorMsg): ?>
-        <div class="card" style="border-color:#fecaca;">
-            <h3 style="margin-top:0;color:#dc2626;">Error</h3>
-            <pre><?= htmlspecialchars($errorMsg) ?></pre>
+        <div class="card" style="border-color:#fecaca; color:#dc2626;">
+            <h3>Error</h3>
+            <p><?= htmlspecialchars($errorMsg) ?></p>
         </div>
     <?php endif; ?>
 
     <?php if (!empty($results)): ?>
         <div class="card">
-            <h3 style="margin-top:0;">Hasil Pengiriman</h3>
+            <h3>Hasil Pengiriman</h3>
             <table>
                 <thead>
                     <tr>
@@ -398,16 +440,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <th>Nomor</th>
                         <th>Status</th>
                         <th>Detail</th>
+                        <th>Batch</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($results as $i => $r): ?>
                         <tr>
                             <td><?= $i + 1 ?></td>
-                            <td><?= htmlspecialchars($r['nama'] ?? '-') ?></td>
-                            <td><?= htmlspecialchars($r['phone'] ?? '-') ?></td>
-                            <td class="<?= ($r['status'] === 'OK') ? 'ok' : 'fail' ?>"><?= $r['status'] ?></td>
-                            <td><code><?= htmlspecialchars((string)($r['detail'] ?? '')) ?></code></td>
+                            <td><?= htmlspecialchars($r['nama']) ?></td>
+                            <td><?= htmlspecialchars($r['phone']) ?></td>
+                            <td class="<?= strtolower($r['status']) === 'ok' ? 'ok' : 'fail' ?>"><?= $r['status'] ?></td>
+                            <td><?= htmlspecialchars($r['detail']) ?></td>
+                            <td><?= htmlspecialchars($r['batch']) ?></td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
