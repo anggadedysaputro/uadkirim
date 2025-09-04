@@ -1,0 +1,18 @@
+{
+    "name": "angga/uadkirim",
+    "description": "buat kirim kirim",
+    "autoload": {
+        "psr-4": {
+            "Angga\\Uadkirim\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "anggadedysaputro",
+            "email": "eanggays@gmail.com"
+        }
+    ],
+    "require": {
+        "box/spout": "^3.3"
+    }
+}
